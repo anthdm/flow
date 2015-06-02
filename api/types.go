@@ -2,15 +2,28 @@ package api
 
 import "fmt"
 
-type Service struct {
-	Name     string
-	Frontend FrontendMeta
-	Protocol string
-	Nodes    NodeList
+type Version struct {
+	Version    string
+	ApiVersion string
+	GitCommit  string
 }
 
+type Service struct {
+	Name     string       `json:"name"`
+	Frontend FrontendMeta `json:"frontend"`
+	Protocol string       `json:"protocol"`
+	Nodes    NodeList     `json:"nodes"`
+}
+
+type ServiceList []Service
+
 type Node struct {
-	Endpoint HostPortPair
+	Host string
+	Port int
+}
+
+func (n *Node) String() string {
+	return fmt.Sprintf("%s:%d", n.Host, n.Port)
 }
 
 type NodeList []Node
@@ -25,7 +38,7 @@ func (hpp HostPortPair) String() string {
 }
 
 type FrontendMeta struct {
-	Scheme     string
-	TargetPath string
-	Route      string
+	Scheme     string `json:"scheme"`
+	TargetPath string `json:"targetPath"`
+	Route      string `json:"route"`
 }

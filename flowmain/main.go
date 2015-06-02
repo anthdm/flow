@@ -7,11 +7,15 @@ import (
 	"time"
 
 	"github.com/twanies/flow/api"
+	"github.com/twanies/flow/api/apiserver"
 	"github.com/twanies/flow/pkg/proxy"
 )
 
 func Main() {
 	var listen = flag.String("listen", ":9999", "")
+	// boot api server
+	apiServer := apiserver.NewServer(":5001")
+	apiServer.ServeAPI()
 
 	// testing purposes
 	services := make([]api.Service, 1)
@@ -23,7 +27,11 @@ func Main() {
 			Route:      "/test",
 			TargetPath: "/",
 		},
-		Nodes: []api.Node{api.Node{api.HostPortPair{Host: "google.com", Port: 80}}},
+		Nodes: []api.Node{
+			api.Node{Host: "192.168.59.103", Port: 3001},
+			api.Node{Host: "192.168.59.103", Port: 3002},
+			api.Node{Host: "192.168.59.103", Port: 3003},
+		},
 	}
 
 	p := proxy.New()

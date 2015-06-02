@@ -13,6 +13,26 @@ import (
 
 type tstServer struct{ *httptest.Server }
 
+func TestGetServiceInfo(t *testing.T) {
+	p := New()
+	services := make([]api.Service, 1)
+	services[0] = api.Service{
+		Name:     "myservice",
+		Protocol: "tcp",
+		Frontend: api.FrontendMeta{
+			Scheme:     "http",
+			Route:      "/myservice",
+			TargetPath: "/",
+		},
+		Nodes: []api.Node{api.Node{api.HostPortPair{Host: "0.0", Port: 3000}}},
+	}
+	p.Update(services)
+	_, ok := p.getServiceInfo("myservice")
+	if !ok {
+		t.Fatal("exptected serviceInfo to be present")
+	}
+}
+
 func newProxyServer(t *testing.T, endpoint string) *tstServer {
 	services := make([]api.Service, 1)
 

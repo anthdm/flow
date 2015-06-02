@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/twanies/flow/api"
 )
+
+var errMissingRoute = errors.New("missing route")
 
 type serviceInfo struct {
 	name     string
@@ -32,8 +35,9 @@ func (hpp hostPortPair) String() string {
 
 type Proxy struct {
 	balancer LoadBalancer
+	mux      Muxer
 
-	lock       sync.RWMutex // protects followin
+	lock       sync.RWMutex // protects following
 	serviceMap map[string]*serviceInfo
 }
 
@@ -41,26 +45,32 @@ func New() *Proxy {
 	return &Proxy{
 		serviceMap: map[string]*serviceInfo{},
 		balancer:   NewServiceBalancer(),
+		mux:        NewMux(),
 	}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	svc, exists := p.serviceMap[r.RequestURI]
+	svcName, ok := p.mux.GetName(r.RequestURI)
+	if !ok {
+		http.Error(w, errMissingRoute.Error(), http.StatusBadRequest)
+		return
+	}
+	info, exists := p.getServiceInfo(svcName)
 	if !exists {
 		http.Error(w, errMissingService.Error(), http.StatusBadRequest)
 		return
 	}
-	endpoint, err := p.balancer.NextEndpoint(svc.name)
+	endpoint, err := p.balancer.NextEndpoint(info.name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	path := svc.frontend.TargetPath
+	path := info.frontend.TargetPath
 	if path == "" {
 		path = "/"
 	}
 
-	r.URL.Scheme = svc.frontend.Scheme
+	r.URL.Scheme = info.frontend.Scheme
 	r.URL.Host = endpoint
 	r.URL.Path = path
 
@@ -73,31 +83,38 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
-func (p *Proxy) Update(services []api.Service) {
+func (p *Proxy) getServiceInfo(svcName string) (*serviceInfo, bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	info, ok := p.serviceMap[svcName]
+	return info, ok
+}
 
+func (p *Proxy) Update(services []api.Service) {
 	for _, svc := range services {
-		_, exists := p.serviceMap[svc.Name]
-		if exists {
-			// TODO update
-			log.Printf("receiving update for service %s", svc.Name)
-			return
-		}
-		log.Printf("receiving new service %s", svc.Name)
-		endpoints := make([]string, len(svc.Nodes))
-		for i, n := range svc.Nodes {
-			endpoints[i] = n.Endpoint.String()
-		}
 		serviceInfo := &serviceInfo{
 			name:     svc.Name,
 			frontend: svc.Frontend,
 			protocol: svc.Protocol,
 			nodes:    svc.Nodes,
 		}
+		endpoints := make([]string, len(svc.Nodes))
+		for i, n := range svc.Nodes {
+			endpoints[i] = n.String()
+		}
 
-		p.serviceMap[svc.Frontend.Route] = serviceInfo
-		// TODO only if its a new service
+		_, exists := p.getServiceInfo(svc.Name)
+		// TODO: compare these
+		// update the serviceMap and only update the balancerState
+		if exists {
+			log.Printf("receiving update for service %s", svc.Name)
+			p.serviceMap[svc.Name] = serviceInfo
+			p.balancer.UpdateState(serviceInfo.name, endpoints)
+			continue
+		}
+		log.Printf("registering %s as a new service", svc.Name)
+		p.mux.Register(svc.Frontend.Route, svc.Name)
+		p.serviceMap[svc.Name] = serviceInfo
 		p.balancer.AddService(serviceInfo.name)
 		p.balancer.UpdateState(serviceInfo.name, endpoints)
 	}

@@ -62,7 +62,7 @@ func (sb *serviceBalancer) AddService(svcName string) {
 	if exists {
 		panic("service allready registered")
 	}
-	log.Printf("registered service %s to the loadbalancer", svcName)
+	log.Printf("registered %s to the loadbalancer", svcName)
 	sb.services[svcName] = &balancerState{}
 }
 
