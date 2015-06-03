@@ -7,18 +7,20 @@ import (
 func TestExpectEndpoints(t *testing.T) {
 	endpoints := []string{"1:3000", "1:3001", "1:3002"}
 	sb := &serviceBalancer{
-		services: make(map[string]*balancerState),
+		services: make(map[ServicePortName]*balancerState),
 	}
-	sb.services["myservice"] = &balancerState{endpoints: endpoints}
-	expectEndpoint(t, "myservice", sb, "1:3000")
-	expectEndpoint(t, "myservice", sb, "1:3001")
-	expectEndpoint(t, "myservice", sb, "1:3002")
+	scv := ServicePortName{"chatservice", ":3000"}
+	sb.services[scv] = &balancerState{endpoints: endpoints}
+	expectEndpoint(t, scv, sb, "1:3000")
+	expectEndpoint(t, scv, sb, "1:3001")
+	expectEndpoint(t, scv, sb, "1:3002")
 }
 
 func TestAddService(t *testing.T) {
 	sb := NewServiceBalancer()
-	sb.AddService("myservice")
-	_, exists := sb.services["myservice"]
+	svc := ServicePortName{"foo", "bar"}
+	sb.AddService(svc)
+	_, exists := sb.services[svc]
 	if !exists {
 		t.Error("expected myservice to have a state")
 	}
@@ -26,14 +28,15 @@ func TestAddService(t *testing.T) {
 
 func TestUpdateNodes(t *testing.T) {
 	sb := NewServiceBalancer()
-	sb.AddService("myservice")
-	sb.UpdateState("myservice", []string{"1:3000", "1:3001"})
-	expectEndpoint(t, "myservice", sb, "1:3000")
-	expectEndpoint(t, "myservice", sb, "1:3001")
+	svc := ServicePortName{"foo", "bar"}
+	sb.AddService(svc)
+	sb.UpdateState(svc, []string{"1:3000", "1:3001"})
+	expectEndpoint(t, svc, sb, "1:3000")
+	expectEndpoint(t, svc, sb, "1:3001")
 }
 
-func expectEndpoint(t *testing.T, svcName string, balancer *serviceBalancer, expected string) {
-	endpoint, err := balancer.NextEndpoint(svcName)
+func expectEndpoint(t *testing.T, service ServicePortName, balancer *serviceBalancer, expected string) {
+	endpoint, err := balancer.NextEndpoint(service)
 	if err != nil {
 		t.Fatal(err)
 	}

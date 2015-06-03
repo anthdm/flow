@@ -1,121 +1,147 @@
 package proxy
 
-import (
-	"errors"
-	"fmt"
-	"io"
-	"log"
-	"net/http"
-	"sync"
+// import (
+// 	"errors"
+// 	"log"
+// 	"sync"
 
-	"github.com/twanies/flow/api"
-)
+// 	"github.com/twanies/flow/api"
+// 	"github.com/twanies/flow/pkg/registry"
+// )
 
-var errMissingRoute = errors.New("missing route")
+// var errMissingRoute = errors.New("missing route")
 
-type serviceInfo struct {
-	name     string
-	frontend api.FrontendMeta
-	protocol string
-	nodes    api.NodeList
-}
+// type serviceInfo struct {
+// 	name     string
+// 	frontend api.FrontendMeta
+// 	protocol string
+// 	nodes    api.NodeList
+// }
 
-type node struct {
-	endpoint hostPortPair
-}
+// type Proxy struct {
+// 	balancer   LoadBalancer
+// 	mux        Muxer
+// 	registry   registry.Register
+// 	updateChan chan api.ServiceList
 
-type hostPortPair struct {
-	host string
-	port int
-}
+// 	lock       sync.RWMutex // protects following
+// 	serviceMap map[string]*serviceInfo
+// }
 
-func (hpp hostPortPair) String() string {
-	return fmt.Sprintf("%s:%d", hpp.host, hpp.port)
-}
+// func New() *Proxy {
+// 	return &Proxy{
+// 		serviceMap: map[string]*serviceInfo{},
+// 		updateChan: make(chan api.ServiceList),
+// 		balancer:   NewServiceBalancer(),
+// 		mux:        NewMux(),
+// 	}
+// }
 
-type Proxy struct {
-	balancer LoadBalancer
-	mux      Muxer
+// // Discover starts to subcribe on the registry and starts a goroutine to watch
+// // for changes on services
+// func (p *Proxy) Discover(registry registry.Register) {
+// 	p.registry = registry
+// 	go p.registry.Subscribe(p.updateChan)
+// 	go p.discoveryLoop()
+// }
 
-	lock       sync.RWMutex // protects following
-	serviceMap map[string]*serviceInfo
-}
+// // discoveryLoop watches for updates in the registry
+// func (p *Proxy) discoveryLoop() {
+// 	for {
+// 		select {
+// 		case services := <-p.updateChan:
+// 			log.Printf("discovered service changes, updating..")
+// 			p.Update(services)
+// 		}
+// 	}
+// }
 
-func New() *Proxy {
-	return &Proxy{
-		serviceMap: map[string]*serviceInfo{},
-		balancer:   NewServiceBalancer(),
-		mux:        NewMux(),
-	}
-}
+// func (p *Proxy) getServiceInfo(svcName string) (*serviceInfo, bool) {
+// 	p.lock.Lock()
+// 	defer p.lock.Unlock()
+// 	info, ok := p.serviceMap[svcName]
+// 	return info, ok
+// }
 
-func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	svcName, ok := p.mux.GetName(r.RequestURI)
-	if !ok {
-		http.Error(w, errMissingRoute.Error(), http.StatusBadRequest)
-		return
-	}
-	info, exists := p.getServiceInfo(svcName)
-	if !exists {
-		http.Error(w, errMissingService.Error(), http.StatusBadRequest)
-		return
-	}
-	endpoint, err := p.balancer.NextEndpoint(info.name)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	path := info.frontend.TargetPath
-	if path == "" {
-		path = "/"
-	}
+// func (p *Proxy) setServiceInfo(svcInfo *serviceInfo) {
+// 	p.lock.Lock()
+// 	defer p.lock.Unlock()
+// 	p.serviceMap[svcInfo.name] = svcInfo
+// }
 
-	r.URL.Scheme = info.frontend.Scheme
-	r.URL.Host = endpoint
-	r.URL.Path = path
+// // Delete a service completly from the proxy
+// // asumes the lock is already held
+// func (p *Proxy) deleteService(svcName string, info *serviceInfo) {
+// 	delete(p.serviceMap, svcName)
+// 	p.mux.Unregister(info.frontend.Route)
+// }
 
-	resp, err := http.DefaultTransport.RoundTrip(r)
-	if err != nil {
-		log.Printf("WARNING %v", err.Error())
-		p.ServeHTTP(w, r)
-		return
-	}
-	io.Copy(w, resp.Body)
-}
+// func (p *Proxy) Update(services api.ServiceList) {
+// 	activeServices := make(map[string]bool)
+// 	for i := range services {
+// 		service := &services[i]
+// 		serviceInfo := &serviceInfo{
+// 			name:     service.Name,
+// 			frontend: service.Frontend,
+// 			protocol: service.Protocol,
+// 			nodes:    service.Nodes,
+// 		}
+// 		endpoints := make([]string, len(service.Nodes))
+// 		for i, n := range service.Nodes {
+// 			endpoints[i] = n.String()
+// 		}
+// 		activeServices[service.Name] = true
 
-func (p *Proxy) getServiceInfo(svcName string) (*serviceInfo, bool) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	info, ok := p.serviceMap[svcName]
-	return info, ok
-}
+// 		info, exists := p.getServiceInfo(service.Name)
+// 		if exists && sameInfo(info, service) {
+// 			// no changes
+// 			continue
+// 		}
+// 		if exists {
+// 			// update the serviceMap and only update the balancerState
+// 			log.Printf("receiving update for service %s", service.Name)
+// 			p.setServiceInfo(serviceInfo)
+// 			p.balancer.UpdateState(serviceInfo.name, endpoints)
+// 			continue
+// 		}
+// 		// A new service is registering
+// 		log.Printf("registering %s as a new service", service.Name)
+// 		p.mux.Register(service.Frontend.Route, service.Name)
+// 		p.serviceMap[service.Name] = serviceInfo
+// 		p.balancer.AddService(serviceInfo.name)
+// 		p.balancer.UpdateState(serviceInfo.name, endpoints)
+// 	}
 
-func (p *Proxy) Update(services []api.Service) {
-	for _, svc := range services {
-		serviceInfo := &serviceInfo{
-			name:     svc.Name,
-			frontend: svc.Frontend,
-			protocol: svc.Protocol,
-			nodes:    svc.Nodes,
-		}
-		endpoints := make([]string, len(svc.Nodes))
-		for i, n := range svc.Nodes {
-			endpoints[i] = n.String()
-		}
+// 	// removing all services not in the servicelist
+// 	p.lock.Lock()
+// 	defer p.lock.Unlock()
+// 	for name, info := range p.serviceMap {
+// 		if !activeServices[name] {
+// 			log.Printf("removing %s from the proxy", name)
+// 			p.deleteService(name, info)
+// 		}
+// 	}
+// }
 
-		_, exists := p.getServiceInfo(svc.Name)
-		// TODO: compare these
-		// update the serviceMap and only update the balancerState
-		if exists {
-			log.Printf("receiving update for service %s", svc.Name)
-			p.serviceMap[svc.Name] = serviceInfo
-			p.balancer.UpdateState(serviceInfo.name, endpoints)
-			continue
-		}
-		log.Printf("registering %s as a new service", svc.Name)
-		p.mux.Register(svc.Frontend.Route, svc.Name)
-		p.serviceMap[svc.Name] = serviceInfo
-		p.balancer.AddService(serviceInfo.name)
-		p.balancer.UpdateState(serviceInfo.name, endpoints)
-	}
-}
+// func sameInfo(info *serviceInfo, service *api.Service) bool {
+// 	if info.frontend.Route != service.Frontend.Route {
+// 		return false
+// 	}
+// 	if info.frontend.Scheme != service.Frontend.Scheme {
+// 		return false
+// 	}
+// 	if info.frontend.TargetPath != service.Frontend.TargetPath {
+// 		return false
+// 	}
+// 	if info.protocol != service.Protocol {
+// 		return false
+// 	}
+// 	if !equalBalancerState() {
+// 		return false
+// 	}
+// 	return true
+// }
+
+// func equalBalancerState() bool {
+// 	return true
+// }

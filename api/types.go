@@ -1,7 +1,5 @@
 package api
 
-import "fmt"
-
 type Version struct {
 	Version    string
 	ApiVersion string
@@ -9,36 +7,42 @@ type Version struct {
 }
 
 type Service struct {
-	Name     string       `json:"name"`
-	Frontend FrontendMeta `json:"frontend"`
-	Protocol string       `json:"protocol"`
-	Nodes    NodeList     `json:"nodes"`
+	// Name is also the key stored in the registry and maps to endpoints
+	// implementing this
+	Name     string        `json:"name"`
+	Frontend FrontendSpec  `json:"frontend"`
+	Ports    []ServicePort `json:"ports"`
 }
 
-type ServiceList []Service
-
-type Node struct {
-	Host string
+type ServicePort struct {
+	// Port needed to be exposed for the service
 	Port int
+
+	// Protocol is the IP protocol of the port. UDP" and "TCP"
+	Protocol string
 }
 
-func (n *Node) String() string {
-	return fmt.Sprintf("%s:%d", n.Host, n.Port)
-}
+// FrontendSpec lets us map HTTP requests to a specific service.
+//
+// EX.
+// You can map "/v1/api" to a specific service. Flow wil handle the loadbalancing
+// between the service endpoints.
+type FrontendSpec struct {
+	// HTTP scheme of the request that needs to be proxied. "HTTP" and "HTTPS"
+	Scheme string `json:"scheme"`
 
-type NodeList []Node
-
-type HostPortPair struct {
-	Host string
-	Port int
-}
-
-func (hpp HostPortPair) String() string {
-	return fmt.Sprintf("%s:%d", hpp.Host, hpp.Port)
-}
-
-type FrontendMeta struct {
-	Scheme     string `json:"scheme"`
+	// TargetPath lets you specify a request URI. Default the TargetPath is "/"
+	// the route "/v1/api" wil map to the root of your service endpoints.
+	// TargetPath wil join the root "/"
 	TargetPath string `json:"targetPath"`
-	Route      string `json:"route"`
+
+	// Route is the request URI that wil map to the assigned servicePort
+	Route string `json:"route"`
+}
+
+type Endpoint struct {
+	// Name of the service that actual implements this endpoint
+	Name string
+	Host string
+	Port int
 }

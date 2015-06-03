@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-etcd/etcd"
 
@@ -21,11 +22,13 @@ type ServiceNameKey struct {
 	Key  string
 }
 
+// Register is something that can store and retrieve services
 type Register interface {
 	GetService(key string) (*api.Service, error)
 	ListServices() (api.ServiceList, error)
 	CreateService(svc *api.Service) (*api.Service, error)
 	DeleteService(serviceName string) error
+	Subscribe(svc chan api.ServiceList)
 }
 
 type Registry struct {
@@ -41,6 +44,7 @@ func NewRegistry() *Registry {
 func (r *Registry) CreateService(svc *api.Service) (*api.Service, error) {
 	key := MakeServiceKey(svc.Name)
 
+	// TODO: stop this error chain only beeing handled at the bottom
 	var err error
 	err = r.setKey(join(key, "protocol"), svc.Protocol)
 	err = r.setKey(join(key, "name"), svc.Name)
@@ -84,6 +88,7 @@ func (r *Registry) createNodes(key string, nodes []api.Node) error {
 	return nil
 }
 
+// Retrieves a single service from the registry
 func (r *Registry) GetService(key string) (*api.Service, error) {
 	kvals, err := r.getKeyVals(key)
 	if err != nil {
@@ -155,6 +160,23 @@ func (r *Registry) getNodes(serviceKey string) (api.NodeList, error) {
 		nodes = append(nodes, *node)
 	}
 	return nodes, err
+}
+
+func (r *Registry) Subscribe(svcChan chan api.ServiceList) {
+	respch := make(chan *etcd.Response)
+	go r.client.Watch(join(namespace, serviceKey), 0, true, respch, nil)
+
+	for {
+		select {
+		case <-respch:
+			time.Sleep(time.Second)
+			services, err := r.ListServices()
+			if err != nil {
+				panic(err)
+			}
+			svcChan <- services
+		}
+	}
 }
 
 // etcd helpers
