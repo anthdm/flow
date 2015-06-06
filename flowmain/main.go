@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/twanies/flow/api"
 	"github.com/twanies/flow/api/apiserver"
 	"github.com/twanies/flow/pkg/proxy"
 )
@@ -18,7 +19,11 @@ func Main() {
 	apiServer.ServeAPI()
 
 	loadBalancer := proxy.NewServiceBalancer()
-	proxier := proxy.NewProxier(loadBalancer)
+	service := &api.Service{
+		Name:     "foo",
+		Protocol: "TCP",
+	}
+	proxier.Update([]api.Service{*service})
 	go proxier.Discover()
 
 	srv := NewServer(*listen, &reverseProxyHandler{})

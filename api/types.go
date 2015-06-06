@@ -7,11 +7,21 @@ type Version struct {
 }
 
 type Service struct {
-	// Name is also the key stored in the registry and maps to endpoints
-	// implementing this
-	Name     string        `json:"name"`
-	Frontend FrontendSpec  `json:"frontend"`
-	Ports    []ServicePort `json:"ports"`
+	// Name is the human friendly DNS name of the service. Flow will map the name
+	// to a valid proxy address.
+	Name string `json:"name"`
+
+	// Protocol is the IP protocol of the port. UDP" and "TCP"
+	Protocol string
+
+	// Port is the internal allocated port
+	Port     int          `json:"port"`
+	Frontend FrontendSpec `json:"frontend"`
+
+	// TODO: implement multiple proxys for services that are not needed to be
+	// loadbalanced like a mongo or redis server. These services need specific
+	// ports to be claimed and assigned
+	Ports []ServicePort `json:"ports"`
 }
 
 type ServicePort struct {
@@ -41,8 +51,12 @@ type FrontendSpec struct {
 }
 
 type Endpoint struct {
-	// Name of the service that actual implements this endpoint
-	Name string
 	Host string
 	Port int
+}
+
+// EndpointSet is a set of endpoints implemented by a specific service
+type EndpointSet struct {
+	Name      string
+	Endpoints []Endpoint
 }

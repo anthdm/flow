@@ -3,7 +3,6 @@ package registry
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,10 +24,10 @@ type ServiceNameKey struct {
 // Register is something that can store and retrieve services
 type Register interface {
 	GetService(key string) (*api.Service, error)
-	ListServices() (api.ServiceList, error)
-	CreateService(svc *api.Service) (*api.Service, error)
-	DeleteService(serviceName string) error
-	Subscribe(svc chan api.ServiceList)
+	ListServices() ([]api.Service, error)
+	CreateService(service *api.Service) (*api.Service, error)
+	DeleteService(name string) error
+	Subscribe(services chan []api.Service)
 }
 
 type Registry struct {
@@ -46,7 +45,6 @@ func (r *Registry) CreateService(svc *api.Service) (*api.Service, error) {
 
 	// TODO: stop this error chain only beeing handled at the bottom
 	var err error
-	err = r.setKey(join(key, "protocol"), svc.Protocol)
 	err = r.setKey(join(key, "name"), svc.Name)
 	err = r.setKey(join(key, "frontend", "scheme"), svc.Frontend.Scheme)
 	err = r.setKey(join(key, "frontend", "route"), svc.Frontend.Route)
@@ -54,8 +52,13 @@ func (r *Registry) CreateService(svc *api.Service) (*api.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = r.createNodes(key, svc.Nodes); err != nil {
-		return nil, err
+	for _, port := range svc.Ports {
+		addr := fmt.Sprintf("%d", port.Port)
+		err = r.setKey(join(key, "ports", "protocol"), port.Protocol)
+		err = r.setKey(join(key, "ports", "port"), addr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return svc, nil
 }
@@ -66,27 +69,27 @@ func (r *Registry) DeleteService(serviceName string) error {
 	return r.deleteKey(key, true)
 }
 
-// Stores a single node in the registry
-func (r *Registry) createNode(key string, node *api.Node) error {
-	if err := r.setKey(join(key, "nodes", node.String(), "host"), node.Host); err != nil {
-		return err
-	}
-	port := fmt.Sprintf("%d", node.Port)
-	if err := r.setKey(join(key, "nodes", node.String(), "port"), port); err != nil {
-		return err
-	}
-	return nil
-}
+// // Stores a single node in the registry
+// func (r *Registry) createNode(key string, node *api.Node) error {
+// 	if err := r.setKey(join(key, "nodes", node.String(), "host"), node.Host); err != nil {
+// 		return err
+// 	}
+// 	port := fmt.Sprintf("%d", node.Port)
+// 	if err := r.setKey(join(key, "nodes", node.String(), "port"), port); err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
 // Stores multiple nodes in the registry
-func (r *Registry) createNodes(key string, nodes []api.Node) error {
-	for _, node := range nodes {
-		if err := r.createNode(key, &node); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// func (r *Registry) createNodes(key string, nodes []api.Node) error {
+// 	for _, node := range nodes {
+// 		if err := r.createNode(key, &node); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return nil
+// }
 
 // Retrieves a single service from the registry
 func (r *Registry) GetService(key string) (*api.Service, error) {
@@ -98,71 +101,80 @@ func (r *Registry) GetService(key string) (*api.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := r.getNodes(key)
-	if err != nil {
-		return nil, err
-	}
+	// nodes, err := r.getNodes(key)
+	// if err != nil {
+	// 	return nil, err
+	// }
 	svc := &api.Service{
-		Name:     kvals.get(key, "name"),
-		Protocol: kvals.get(key, "protocol"),
-		Frontend: api.FrontendMeta{
+		Name: kvals.get(key, "name"),
+		Frontend: api.FrontendSpec{
 			Scheme:     frontend.get(key, "frontend", "scheme"),
 			Route:      frontend.get(key, "frontend", "route"),
 			TargetPath: frontend.get(key, "frontend", "targetpath"),
 		},
-		Nodes: nodes,
 	}
 	return svc, nil
 }
 
+func (r *Registry) getPort(key string) (*api.ServicePort, error) {
+	keyVals, err := r.getKeyVals(key, "ports")
+	if err != nil {
+		return nil, err
+	}
+	port := &api.ServicePort{
+		Protocol: keyVals.get(key, "ports", "protocol"),
+	}
+	return port, nil
+}
+
 // list all stored services
-func (r *Registry) ListServices() (api.ServiceList, error) {
+func (r *Registry) ListServices() ([]api.Service, error) {
 	keys, err := r.getDirKeys(namespace, serviceKey)
 	if err != nil {
-		return api.ServiceList{}, err
+		return []api.Service{}, err
 	}
 
-	var services api.ServiceList
+	var services []api.Service
 	for _, key := range keys {
 		service, err := r.GetService(key)
 		if err != nil {
-			return api.ServiceList{}, nil
+			return []api.Service{}, nil
 		}
 		services = append(services, *service)
 	}
 	return services, nil
 }
 
-func (r *Registry) getNode(key string) (*api.Node, error) {
-	keyVals, err := r.getKeyVals(key)
-	if err != nil {
-		return nil, err
-	}
-	port, _ := strconv.Atoi(keyVals.get(key, "port"))
-	node := &api.Node{
-		Host: keyVals.get(key, "host"),
-		Port: port,
-	}
-	return node, nil
-}
+// func (r *Registry) getNode(key string) (*api.Node, error) {
+// 	keyVals, err := r.getKeyVals(key)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	port, _ := strconv.Atoi(keyVals.get(key, "port"))
+// 	node := &api.Node{
+// 		Host: keyVals.get(key, "host"),
+// 		Port: port,
+// 	}
+// 	return node, nil
+// }
 
-func (r *Registry) getNodes(serviceKey string) (api.NodeList, error) {
-	var nodes api.NodeList
-	keys, err := r.getDirKeys(serviceKey, "nodes")
-	if err != nil {
-		return api.NodeList{}, nil
-	}
-	for _, key := range keys {
-		node, err := r.getNode(key)
-		if err != nil {
-			return api.NodeList{}, err
-		}
-		nodes = append(nodes, *node)
-	}
-	return nodes, err
-}
+// func (r *Registry) getNodes(serviceKey string) (api.NodeList, error) {
+// 	var nodes api.NodeList
+// 	keys, err := r.getDirKeys(serviceKey, "nodes")
+// 	if err != nil {
+// 		return api.NodeList{}, nil
+// 	}
+// 	for _, key := range keys {
+// 		node, err := r.getNode(key)
+// 		if err != nil {
+// 			return api.NodeList{}, err
+// 		}
+// 		nodes = append(nodes, *node)
+// 	}
+// 	return nodes, err
+// }
 
-func (r *Registry) Subscribe(svcChan chan api.ServiceList) {
+func (r *Registry) Subscribe(svcChan chan []api.Service) {
 	respch := make(chan *etcd.Response)
 	go r.client.Watch(join(namespace, serviceKey), 0, true, respch, nil)
 

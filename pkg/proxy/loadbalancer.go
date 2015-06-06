@@ -2,8 +2,12 @@ package proxy
 
 import (
 	"errors"
+	"fmt"
 	"log"
+	"reflect"
 	"sync"
+
+	"github.com/twanies/flow/api"
 )
 
 var (
@@ -11,10 +15,9 @@ var (
 	errMissingEndpoints = errors.New("missing endpoints")
 )
 
-// LoadBalancer is anything that can return a endpoint
+// LoadBalancer is an interface for directing traffic between service endpoints
 type LoadBalancer interface {
 	AddService(service ServicePortName)
-	UpdateState(service ServicePortName, endpoints []string)
 	NextEndpoint(service ServicePortName) (string, error)
 }
 
@@ -22,8 +25,12 @@ type LoadBalancer interface {
 type ServicePortName struct {
 	// A service is assumed to have its proxy port on the same machine flow is
 	// running
-	Port string
 	Name string
+	Port string
+}
+
+func (s ServicePortName) String() string {
+	return fmt.Sprintf("%s:%s", s.Name, s.Port)
 }
 
 // serviceBalancer directs traffic between nodes from the same service cluster
@@ -47,10 +54,8 @@ func NewServiceBalancer() *serviceBalancer {
 func (sb *serviceBalancer) NextEndpoint(service ServicePortName) (string, error) {
 	sb.lock.Lock()
 	defer sb.lock.Unlock()
-
 	state, exists := sb.services[service]
 	if !exists {
-		log.Println("%v does not exist in %v", state, sb.services)
 		return "", errMissingService
 	}
 	if len(state.endpoints) == 0 {
@@ -65,24 +70,63 @@ func (sb *serviceBalancer) NextEndpoint(service ServicePortName) (string, error)
 func (sb *serviceBalancer) AddService(service ServicePortName) {
 	sb.lock.Lock()
 	defer sb.lock.Unlock()
-
-	_, exists := sb.services[service]
-	if exists {
-		panic("service allready registered")
-	}
-	log.Printf("registered %s to the loadbalancer", service)
-	sb.services[service] = &balancerState{}
+	sb.addServiceInternal(service)
 }
 
-// TODO: loop state endpoints and only remove or add those missing or present
-// asumes the lock is allready held
-func (sb *serviceBalancer) UpdateState(service ServicePortName, endpoints []string) {
+// addServiceInternal used for adding a new service when the lock is allready held
+// Addservice will cause a deadlock assumes the lock is allready held
+func (sb *serviceBalancer) addServiceInternal(service ServicePortName) *balancerState {
+	if _, exists := sb.services[service]; !exists {
+		sb.services[service] = &balancerState{}
+	}
+	log.Printf("registered %s to the loadbalancer", service)
+	return sb.services[service]
+}
+
+// Update wil compare the new endpointSet with the existing state.
+func (sb *serviceBalancer) Update(endpoints []api.EndpointSet) {
+	registeredEndpoints := make(map[ServicePortName]bool)
 	sb.lock.Lock()
 	defer sb.lock.Unlock()
 
-	state, exists := sb.services[service]
-	if !exists {
-		panic(errMissingService)
+	for i := range endpoints {
+		svcEndpoints := &endpoints[i]
+		serviceName := ServicePortName{svcEndpoints.Name, ""}
+		state, exists := sb.services[serviceName]
+		curEndpoints := []string{}
+		if state != nil {
+			curEndpoints = state.endpoints
+		}
+		newEndpoints := endpointsToSlice(svcEndpoints)
+		if !exists || !equalSlices(curEndpoints, newEndpoints) {
+			state := sb.addServiceInternal(serviceName)
+			state.endpoints = endpointsToSlice(svcEndpoints)
+			state.index = 0
+		}
+		registeredEndpoints[serviceName] = true
 	}
-	state.endpoints = endpoints
+
+	for k := range sb.services {
+		if _, ok := registeredEndpoints[k]; !ok {
+			delete(sb.services, k)
+		}
+	}
+}
+
+func endpointsToSlice(endpoints *api.EndpointSet) []string {
+	var out []string
+	for _, endpoint := range endpoints.Endpoints {
+		out = append(out, fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port))
+	}
+	return out
+}
+
+func equalSlices(src, dst []string) bool {
+	if len(src) != len(dst) {
+		return false
+	}
+	if !reflect.DeepEqual(src, dst) {
+		return false
+	}
+	return true
 }

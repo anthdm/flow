@@ -1,10 +1,12 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"strings"
+	"time"
 )
 
 const (
@@ -15,6 +17,21 @@ const (
 )
 
 type ProxySocket interface {
+	ProxyLoop(service ServicePortName, info *serviceInfo, proxy *Proxier)
+	Close() error
+}
+
+func newProxySocket(protocol string, port int) (ProxySocket, error) {
+	switch strings.ToUpper(protocol) {
+	case "TCP":
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			return nil, err
+		}
+		return &tcpSocket{listener}, nil
+	default:
+		return nil, fmt.Errorf("no implementation for %s", protocol)
+	}
 }
 
 type tcpSocket struct {
@@ -22,22 +39,26 @@ type tcpSocket struct {
 }
 
 // connect attemps to connect to the destination service port
-func (tcp *tcpSocket) connect(service ServicePortName, proxy *Proxier) (net.Conn, error) {
+// TODO: implement couple retries with incrementing timeout duration
+func (tcp *tcpSocket) connect(service ServicePortName, protocol string, proxy *Proxier) (net.Conn, error) {
 	endpoint, err := proxy.loadBalancer.NextEndpoint(service)
 	if err != nil {
 		return nil, err
 	}
-	// TODO: serviceInfo protocol
-	conn, err := net.Dial("TCP", endpoint)
+	conn, err := net.DialTimeout(protocol, endpoint, 2*time.Second)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dial failed: %v", err)
 	}
 	return conn, nil
 }
 
-func (tcp *tcpSocket) proxyLoop(service ServicePortName, oldInfo *serviceInfo, proxy *Proxier) {
+func (tcp *tcpSocket) Close() error {
+	return tcp.Listener.Close()
+}
+
+func (tcp *tcpSocket) ProxyLoop(service ServicePortName, newInfo *serviceInfo, proxy *Proxier) {
 	for {
-		if info, exists := proxy.getServiceInfo(service); !exists || oldInfo != info {
+		if info, exists := proxy.getServiceInfo(service); !exists || newInfo != info {
 			return // this means the old port is replaced or closed
 		}
 		rwc, err := tcp.Accept()
@@ -48,20 +69,20 @@ func (tcp *tcpSocket) proxyLoop(service ServicePortName, oldInfo *serviceInfo, p
 			log.Printf("failed to accept: %v", err)
 			continue
 		}
-		rwr, err := tcp.connect(service, proxy)
+		rwr, err := tcp.connect(service, newInfo.protocol, proxy)
 		if err != nil {
 			log.Printf("failed to connect to service endpoint: %v", err)
 			rwr.Close()
 			continue
 		}
-
-		done := make(chan bool, 1)
-		go copyContent(rwc, rwr, done)
-		go copyContent(rwr, rwc, done)
-		<-done
-
-		rwc.Close()
-		rwr.Close()
+		go func() {
+			done := make(chan bool, 1)
+			go copyContent(rwc, rwr, done)
+			go copyContent(rwr, rwc, done)
+			<-done
+			rwc.Close()
+			rwr.Close()
+		}()
 	}
 }
 
