@@ -1,10 +1,13 @@
 package proxy
 
 import (
+	"errors"
 	"math/big"
 	"math/rand"
 	"sync"
 )
+
+var ErrPortClaimed = errors.New("port allready claimed")
 
 type PortAllocator struct {
 	port chan int
@@ -31,8 +34,12 @@ func (p *PortAllocator) portRange() int {
 	return p.max - p.min
 }
 
-func (p *PortAllocator) ClaimPort() int {
-	return <-p.port
+func (p *PortAllocator) AssignNext() (int, error) {
+	port := <-p.port
+	if port == -1 {
+		return -1, ErrPortClaimed
+	}
+	return port, nil
 }
 
 func (p *PortAllocator) run(port chan int) {
@@ -69,4 +76,14 @@ func (p *PortAllocator) nextPort() int {
 		}
 	}
 	return -1
+}
+
+func (p *PortAllocator) Release(port int) {
+	port -= p.min
+	if port < 0 || port > p.portRange() {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.claimed.SetBit(&p.claimed, port, 0)
 }

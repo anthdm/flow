@@ -26,12 +26,15 @@ type Proxier struct {
 
 	mu         sync.RWMutex // protects following
 	serviceMap map[ServicePortName]*serviceInfo
+	proxyPorts *PortAllocator
 }
 
 func NewProxier(loadBalancer LoadBalancer) *Proxier {
+	proxyPorts := NewPortAllocator(2000, 3000)
 	return &Proxier{
 		loadBalancer: loadBalancer,
 		serviceMap:   make(map[ServicePortName]*serviceInfo),
+		proxyPorts:   proxyPorts,
 	}
 }
 
@@ -52,9 +55,9 @@ func (p *Proxier) Update(services []api.Service) {
 
 		}
 		log.Printf("discovering %s as a new service", serviceName)
-		port, err := claimNextPort()
+		port, err := p.proxyPorts.AssignNext()
 		if err != nil {
-			log.Printf("failed to claim port for %s", serviceName)
+			log.Printf("failed to assign new port for %s", serviceName)
 			continue
 		}
 		info, err = p.addServiceToPort(serviceName, service.Protocol, port)
@@ -77,6 +80,7 @@ func (p *Proxier) Update(services []api.Service) {
 			if err := info.socket.Close(); err != nil {
 				log.Printf("failed to stop service %s", service)
 			}
+			p.proxyPorts.Release(info.proxyPort)
 		}
 	}
 }
@@ -109,10 +113,6 @@ func (p *Proxier) Discover() {
 			log.Println("looping")
 		}
 	}
-}
-
-func claimNextPort() (int, error) {
-	return 3333, nil
 }
 
 func (p *Proxier) addServiceToPort(service ServicePortName, protocol string, proxyPort int) (*serviceInfo, error) {
