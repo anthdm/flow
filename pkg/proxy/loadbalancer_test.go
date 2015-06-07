@@ -17,7 +17,7 @@ func TestNewService(t *testing.T) {
 }
 
 func TestLoadBalancerFailsNoEndpoints(t *testing.T) {
-	var endpoints []api.EndpointSet
+	var endpoints []api.Endpoints
 	loadBalancer := NewServiceBalancer()
 	loadBalancer.Update(endpoints)
 	service := ServicePortName{"foo", "bar"}
@@ -32,9 +32,9 @@ func TestLoadBalancerFailsNoEndpoints(t *testing.T) {
 
 func TestExpectEndpoints(t *testing.T) {
 	serviceName := ServicePortName{"foo", ""}
-	endpointSet := api.EndpointSet{
+	endpoints := api.Endpoints{
 		Name: "foo",
-		Endpoints: []api.Endpoint{
+		Subset: []api.Endpoint{
 			api.Endpoint{"1.1", 3000},
 			api.Endpoint{"1.1", 3001},
 			api.Endpoint{"1.1", 3002},
@@ -42,23 +42,23 @@ func TestExpectEndpoints(t *testing.T) {
 	}
 	balancer := NewServiceBalancer()
 	balancer.AddService(serviceName)
-	balancer.Update([]api.EndpointSet{endpointSet})
+	balancer.Update([]api.Endpoints{endpoints})
 	expectEndpoint(t, serviceName, balancer, "1.1:3000")
 	expectEndpoint(t, serviceName, balancer, "1.1:3001")
 	expectEndpoint(t, serviceName, balancer, "1.1:3002")
 }
 
 func TestExpectEndpointsWithNoService(t *testing.T) {
-	endpointSet := api.EndpointSet{
+	endpoints := api.Endpoints{
 		Name: "foo",
-		Endpoints: []api.Endpoint{
+		Subset: []api.Endpoint{
 			api.Endpoint{"1.1", 3000},
 			api.Endpoint{"1.1", 3001},
 			api.Endpoint{"1.1", 3002},
 		},
 	}
 	loadBalancer := NewServiceBalancer()
-	loadBalancer.Update([]api.EndpointSet{endpointSet})
+	loadBalancer.Update([]api.Endpoints{endpoints})
 	service := ServicePortName{"foo", ""}
 	expectEndpoint(t, service, loadBalancer, "1.1:3000")
 	expectEndpoint(t, service, loadBalancer, "1.1:3001")
@@ -69,15 +69,15 @@ func TestUpdateDeleteEndpoints(t *testing.T) {
 	service := ServicePortName{"foo", ""}
 	lb := NewServiceBalancer()
 	lb.AddService(service)
-	endpointSet := api.EndpointSet{
+	endpoints := api.Endpoints{
 		Name: "bar",
-		Endpoints: []api.Endpoint{
+		Subset: []api.Endpoint{
 			api.Endpoint{"1.1", 3000},
 			api.Endpoint{"1.1", 3001},
 			api.Endpoint{"1.1", 3002},
 		},
 	}
-	lb.Update([]api.EndpointSet{endpointSet})
+	lb.Update([]api.Endpoints{endpoints})
 	if _, ok := lb.services[service]; ok {
 		t.Fatal("expexted %s not to be present in the serviceMap")
 	}

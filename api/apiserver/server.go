@@ -69,55 +69,64 @@ func (s *Server) getVersion(w http.ResponseWriter, r *http.Request, vars map[str
 }
 
 func (s *Server) postCreateService(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	if err := isReqJson(r); err != nil {
+	if vars == nil {
+		return errors.New("missing params")
+	}
+	svc := api.Service{}
+	if err := json.NewDecoder(r.Body).Decode(&svc); err != nil {
+		return fmt.Errorf("failed to decode the response body: %v", err)
+	}
+	defer r.Body.Close()
+	service, err := s.registry.CreateService(&svc)
+	if err != nil {
 		return err
 	}
+	return writeJSON(w, http.StatusOK, service)
+}
 
-	service := api.Service{}
-	if err := json.NewDecoder(r.Body).Decode(&service); err != nil {
-		return fmt.Errorf("failed to decode the response body")
+func (s *Server) getService(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	if vars == nil {
+		return errors.New("missin params")
 	}
-	out, err := s.registry.CreateService(&service)
+	name := vars["name"]
+	service, err := s.registry.GetService("/flow/services/" + name)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, service)
+}
+
+func (s *Server) postCreateEndpoints(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	if vars == nil {
+		return errors.New("missing params")
+	}
+	endpoints := api.Endpoints{}
+	if err := json.NewDecoder(r.Body).Decode(&endpoints); err != nil {
+		return fmt.Errorf("failed to decode the response body: %v", err)
+	}
+	out, err := s.registry.CreateEndpoints(&endpoints)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) getService(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	name := vars["svc"]
-	if name == "" {
-		return errors.New("missing parameter (name)")
-	}
-	serviceKey := registry.MakeServiceKey(name)
-	svc, err := s.registry.GetService(serviceKey)
+func (s *Server) getServiceEndpoints(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	name := vars["name"]
+	keyspace := "/flow/endpoints/" + name
+	endpoints, err := s.registry.GetServiceEndpoints(keyspace)
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, svc)
+	return writeJSON(w, http.StatusOK, endpoints)
 }
 
-func (s *Server) deleteService(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	name := vars["svc"]
-	if name == "" {
-		return errors.New("missing parameter (name)")
-	}
-	if err := s.registry.DeleteService(name); err != nil {
-		return err
-	}
-	return writeJSON(w, http.StatusOK, name+"deleted")
-}
-
-func (s *Server) getListServices(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	services, err := s.registry.ListServices()
+func (s *Server) getListEndpoints(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	allEndpoints, err := s.registry.GetEndpoints()
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, services)
-}
-
-func (s *Server) postAddNode(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	return nil
+	return writeJSON(w, http.StatusOK, allEndpoints)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v interface{}) error {
@@ -130,17 +139,15 @@ func createRouter(s *Server) *mux.Router {
 	r := mux.NewRouter()
 	m := map[string]map[string]httpApifunc{
 		"GET": {
-			"/version":       s.getVersion,
-			"/service/{svc}": s.getService,
-			"/service":       s.getListServices,
+			"/service/{name}":   s.getService,
+			"/endpoints/{name}": s.getServiceEndpoints,
+			"/endpoints":        s.getListEndpoints,
 		},
 		"POST": {
-			"/service":                s.postCreateService,
-			"/service/{svc}/add_node": s.postAddNode,
+			"/service":   s.postCreateService,
+			"/endpoints": s.postCreateEndpoints,
 		},
-		"DELETE": {
-			"/service/{svc}": s.deleteService,
-		},
+		"DELETE": {},
 	}
 	for method, routes := range m {
 		for route, handler := range routes {
@@ -187,6 +194,12 @@ func httpError(w http.ResponseWriter, err error) {
 func makeHttpHandler(h httpApifunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
+		if r.Method == "POST" {
+			if err := isReqJson(r); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		if err := h(w, r, vars); err != nil {
 			httpError(w, err)
 			return

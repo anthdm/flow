@@ -21,10 +21,10 @@ var tcpServerPort int
 func TestUpdateProxier(t *testing.T) {
 	lb := NewServiceBalancer()
 	service := ServicePortName{"foo", ""}
-	lb.Update([]api.EndpointSet{
+	lb.Update([]api.Endpoints{
 		{
-			Name:      "foo",
-			Endpoints: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
+			Name:   "foo",
+			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
 		},
 	})
 	proxier := NewProxier(lb)
@@ -40,10 +40,10 @@ func TestUpdateProxier(t *testing.T) {
 func TestUpdateDelete(t *testing.T) {
 	lb := NewServiceBalancer()
 	service := ServicePortName{"chat", ""}
-	lb.Update([]api.EndpointSet{
+	lb.Update([]api.Endpoints{
 		{
-			Name:      "chat",
-			Endpoints: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
+			Name:   "chat",
+			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
 		},
 	})
 	proxier := NewProxier(lb)
@@ -65,10 +65,10 @@ func TestUpdateDelete(t *testing.T) {
 func TestTcpUpdateDeleteUpdate(t *testing.T) {
 	lb := NewServiceBalancer()
 	service := ServicePortName{"chat", ""}
-	lb.Update([]api.EndpointSet{
+	lb.Update([]api.Endpoints{
 		{
-			Name:      "chat",
-			Endpoints: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
+			Name:   "chat",
+			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
 		},
 	})
 	proxier := NewProxier(lb)
@@ -96,10 +96,10 @@ func TestTcpUpdateDeleteUpdate(t *testing.T) {
 func TestCloseProxy(t *testing.T) {
 	lb := NewServiceBalancer()
 	service := ServicePortName{"foo", ""}
-	lb.Update([]api.EndpointSet{
+	lb.Update([]api.Endpoints{
 		{
-			Name:      "chat",
-			Endpoints: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
+			Name:   "chat",
+			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
 		},
 	})
 	proxier := NewProxier(lb)

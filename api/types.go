@@ -12,7 +12,7 @@ type Service struct {
 	Name string `json:"name"`
 
 	// Protocol is the IP protocol of the port. UDP" and "TCP"
-	Protocol string
+	Protocol string `json:"protocol"`
 
 	// Port is the internal allocated port
 	Port     int          `json:"port"`
@@ -51,12 +51,12 @@ type FrontendSpec struct {
 }
 
 type Endpoint struct {
-	Host string
-	Port int
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
-// EndpointSet is a set of endpoints implemented by a specific service
-type EndpointSet struct {
-	Name      string
-	Endpoints []Endpoint
+// Endpoints is a set of endpoints implemented by a specific service
+type Endpoints struct {
+	Name   string     `json:"name"`
+	Subset []Endpoint `json:"subset"`
 }

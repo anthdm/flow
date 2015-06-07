@@ -84,7 +84,7 @@ func (sb *serviceBalancer) addServiceInternal(service ServicePortName) *balancer
 }
 
 // Update wil compare the new endpointSet with the existing state.
-func (sb *serviceBalancer) Update(endpoints []api.EndpointSet) {
+func (sb *serviceBalancer) Update(endpoints []api.Endpoints) {
 	registeredEndpoints := make(map[ServicePortName]bool)
 	sb.lock.Lock()
 	defer sb.lock.Unlock()
@@ -113,9 +113,9 @@ func (sb *serviceBalancer) Update(endpoints []api.EndpointSet) {
 	}
 }
 
-func endpointsToSlice(endpoints *api.EndpointSet) []string {
+func endpointsToSlice(endpoints *api.Endpoints) []string {
 	var out []string
-	for _, endpoint := range endpoints.Endpoints {
+	for _, endpoint := range endpoints.Subset {
 		out = append(out, fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port))
 	}
 	return out

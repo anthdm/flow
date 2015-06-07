@@ -3,31 +3,27 @@ package registry
 import (
 	"errors"
 	"fmt"
+	"net"
+	"path"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/coreos/go-etcd/etcd"
-
 	"github.com/twanies/flow/api"
 )
 
 const (
-	namespace  = "/flow"
-	serviceKey = "services"
+	root         string = "/flow"
+	servicePath  string = "/services"
+	endpointPath string = "/endpoints"
 )
 
-type ServiceNameKey struct {
-	Name string
-	Key  string
-}
-
-// Register is something that can store and retrieve services
 type Register interface {
-	GetService(key string) (*api.Service, error)
-	ListServices() ([]api.Service, error)
 	CreateService(service *api.Service) (*api.Service, error)
-	DeleteService(name string) error
-	Subscribe(services chan []api.Service)
+	GetService(key string) (*api.Service, error)
+	CreateEndpoints(endpoints *api.Endpoints) (*api.Endpoints, error)
+	GetServiceEndpoints(name string) (*api.Endpoints, error)
+	GetEndpoints() ([]api.Endpoints, error)
 }
 
 type Registry struct {
@@ -40,169 +36,120 @@ func NewRegistry() *Registry {
 	return &Registry{client}
 }
 
-func (r *Registry) CreateService(svc *api.Service) (*api.Service, error) {
-	key := MakeServiceKey(svc.Name)
-
-	// TODO: stop this error chain only beeing handled at the bottom
-	var err error
-	err = r.setKey(join(key, "name"), svc.Name)
-	err = r.setKey(join(key, "frontend", "scheme"), svc.Frontend.Scheme)
-	err = r.setKey(join(key, "frontend", "route"), svc.Frontend.Route)
-	err = r.setKey(join(key, "frontend", "targetpath"), svc.Frontend.TargetPath)
-	if err != nil {
-		return nil, err
-	}
-	for _, port := range svc.Ports {
-		addr := fmt.Sprintf("%d", port.Port)
-		err = r.setKey(join(key, "ports", "protocol"), port.Protocol)
-		err = r.setKey(join(key, "ports", "port"), addr)
-		if err != nil {
+// CreateService stores a new service to the registry
+func (r *Registry) CreateService(service *api.Service) (*api.Service, error) {
+	kvList := keyValList{}
+	kvList.add("protocol", service.Protocol)
+	kvList.add("name", service.Name)
+	for _, kv := range kvList.list {
+		key := path.Join(makeEtcdServiceKey(service.Name), kv.key)
+		if err := r.setKey(key, kv.value); err != nil {
 			return nil, err
 		}
 	}
-	return svc, nil
+	return service, nil
 }
 
-// Delete a service by its name recursively
-func (r *Registry) DeleteService(serviceName string) error {
-	key := MakeServiceKey(serviceName)
-	return r.deleteKey(key, true)
-}
-
-// // Stores a single node in the registry
-// func (r *Registry) createNode(key string, node *api.Node) error {
-// 	if err := r.setKey(join(key, "nodes", node.String(), "host"), node.Host); err != nil {
-// 		return err
-// 	}
-// 	port := fmt.Sprintf("%d", node.Port)
-// 	if err := r.setKey(join(key, "nodes", node.String(), "port"), port); err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
-// Stores multiple nodes in the registry
-// func (r *Registry) createNodes(key string, nodes []api.Node) error {
-// 	for _, node := range nodes {
-// 		if err := r.createNode(key, &node); err != nil {
-// 			return err
-// 		}
-// 	}
-// 	return nil
-// }
-
-// Retrieves a single service from the registry
+// GetService retrieves a service from the registry
 func (r *Registry) GetService(key string) (*api.Service, error) {
-	kvals, err := r.getKeyVals(key)
+	kvals, err := r.getKeyValues(key)
 	if err != nil {
 		return nil, err
 	}
-	frontend, err := r.getKeyVals(key, "frontend")
-	if err != nil {
-		return nil, err
+	service := &api.Service{
+		Name:     kvals.get(key, "name"),
+		Protocol: kvals.get(key, "protocol"),
 	}
-	// nodes, err := r.getNodes(key)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	svc := &api.Service{
-		Name: kvals.get(key, "name"),
-		Frontend: api.FrontendSpec{
-			Scheme:     frontend.get(key, "frontend", "scheme"),
-			Route:      frontend.get(key, "frontend", "route"),
-			TargetPath: frontend.get(key, "frontend", "targetpath"),
-		},
-	}
-	return svc, nil
+	return service, nil
 }
 
-func (r *Registry) getPort(key string) (*api.ServicePort, error) {
-	keyVals, err := r.getKeyVals(key, "ports")
-	if err != nil {
-		return nil, err
+// CreateEndpoints stores endpoints implemented by a service
+// endpoints are stored like "/flow/endpoints/{name}/host:port"
+func (r *Registry) CreateEndpoints(endpoints *api.Endpoints) (*api.Endpoints, error) {
+	for _, endpoint := range endpoints.Subset {
+		hostPort := fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port)
+		endpointKeyspace := path.Join(root, endpointPath, endpoints.Name, hostPort)
+		if err := r.createDir(endpointKeyspace); err != nil {
+			return nil, err
+		}
 	}
-	port := &api.ServicePort{
-		Protocol: keyVals.get(key, "ports", "protocol"),
-	}
-	return port, nil
+	return endpoints, nil
 }
 
-// list all stored services
-func (r *Registry) ListServices() ([]api.Service, error) {
-	keys, err := r.getDirKeys(namespace, serviceKey)
+// GetEndpoints retrieves all endpoints stored in the registry
+func (r *Registry) GetEndpoints() ([]api.Endpoints, error) {
+	var allEndpoints []api.Endpoints
+	keys, err := r.getDirKeys(root, endpointPath)
 	if err != nil {
-		return []api.Service{}, err
+		return allEndpoints, err
 	}
-
-	var services []api.Service
 	for _, key := range keys {
-		service, err := r.GetService(key)
+		endpoints, err := r.GetServiceEndpoints(key)
 		if err != nil {
-			return []api.Service{}, nil
+			return allEndpoints, err
 		}
-		services = append(services, *service)
+		allEndpoints = append(allEndpoints, *endpoints)
 	}
-	return services, nil
+	return allEndpoints, nil
 }
 
-// func (r *Registry) getNode(key string) (*api.Node, error) {
-// 	keyVals, err := r.getKeyVals(key)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	port, _ := strconv.Atoi(keyVals.get(key, "port"))
-// 	node := &api.Node{
-// 		Host: keyVals.get(key, "host"),
-// 		Port: port,
-// 	}
-// 	return node, nil
-// }
-
-// func (r *Registry) getNodes(serviceKey string) (api.NodeList, error) {
-// 	var nodes api.NodeList
-// 	keys, err := r.getDirKeys(serviceKey, "nodes")
-// 	if err != nil {
-// 		return api.NodeList{}, nil
-// 	}
-// 	for _, key := range keys {
-// 		node, err := r.getNode(key)
-// 		if err != nil {
-// 			return api.NodeList{}, err
-// 		}
-// 		nodes = append(nodes, *node)
-// 	}
-// 	return nodes, err
-// }
-
-func (r *Registry) Subscribe(svcChan chan []api.Service) {
-	respch := make(chan *etcd.Response)
-	go r.client.Watch(join(namespace, serviceKey), 0, true, respch, nil)
-
-	for {
-		select {
-		case <-respch:
-			time.Sleep(time.Second)
-			services, err := r.ListServices()
-			if err != nil {
-				panic(err)
-			}
-			svcChan <- services
-		}
+// GetServiceEndpoints retrieves the endpoints from a service by its keyspace
+func (r *Registry) GetServiceEndpoints(key string) (*api.Endpoints, error) {
+	keys, err := r.getDirKeys(key)
+	if err != nil {
+		return nil, err
 	}
+	name := strings.TrimPrefix(key, path.Join(root, endpointPath))
+	name = strings.TrimPrefix(name, "/")
+	var subset []api.Endpoint
+	for _, key := range keys {
+		host, port := extractEndpointFromKey(key)
+		endpoint := api.Endpoint{host, port}
+		subset = append(subset, endpoint)
+	}
+	endpoints := &api.Endpoints{
+		Name:   name,
+		Subset: subset,
+	}
+	return endpoints, nil
 }
 
-// etcd helpers
+// extracts the "host:port" string from a full endpoint keyspace
+// "/flow/endpoints/{name}/1.1:3000"
+func extractEndpointFromKey(key string) (string, int) {
+	pathTrimmed := strings.TrimPrefix(key, path.Join(root, endpointPath))
+	pathTrimmed = strings.TrimPrefix(pathTrimmed, "/")
+	parts := strings.Split(pathTrimmed, "/")
+	hostPort := parts[1]
+	host, portStr, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		panic(err)
+	}
+	port, _ := strconv.Atoi(portStr)
+	return host, port
+}
+
+// etcd helper methods
+func (r *Registry) setKey(key, val string) error {
+	_, err := r.client.Set(key, val, 0)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *Registry) getValue(keys ...string) (string, error) {
 	resp, err := r.client.Get(strings.Join(keys, "/"), false, false)
 	if err != nil {
 		return "", err
 	}
 	if isDir(resp.Node) {
-		return "", errors.New("value not found")
+		return "", errors.New("key not found")
 	}
 	return resp.Node.Value, nil
 }
 
+// getDirKeys returns all the keys that are etcd directories
 func (r *Registry) getDirKeys(keys ...string) ([]string, error) {
 	var out []string
 	resp, err := r.client.Get(strings.Join(keys, "/"), false, true)
@@ -217,60 +164,62 @@ func (r *Registry) getDirKeys(keys ...string) ([]string, error) {
 	return out, nil
 }
 
-type keyValMap map[string]string
-
-func (kv keyValMap) get(keys ...string) string {
-	val, ok := kv[strings.Join(keys, "/")]
-	if !ok {
-		return ""
+func (r *Registry) createDir(key string) error {
+	_, err := r.client.CreateDir(key, 0)
+	if err != nil {
+		return err
 	}
-	return val
+	return nil
 }
 
-func (r *Registry) getKeyVals(keys ...string) (keyValMap, error) {
-	resp, err := r.client.Get(strings.Join(keys, "/"), false, true)
-	if err != nil {
-		return nil, err
-	}
-	kv := make(keyValMap, len(resp.Node.Nodes))
-	for _, node := range resp.Node.Nodes {
-		if !isDir(node) {
-			kv[node.Key] = node.Value
+type keyValPair struct {
+	key   string
+	value string
+}
+
+type keyValList struct {
+	list []keyValPair
+}
+
+func (kvList *keyValList) get(keys ...string) string {
+	for _, kv := range kvList.list {
+		if kv.key == strings.Join(keys, "/") {
+			return kv.value
 		}
 	}
-	return kv, nil
+	return ""
 }
 
-func (r *Registry) setKey(key, val string) error {
-	_, err := r.client.Set(key, val, 0)
-	return err
+func (kvList *keyValList) add(key, value string) {
+	kvList.list = append(kvList.list, keyValPair{key, value})
 }
 
-func (r *Registry) deleteKey(key string, rf bool) error {
-	_, err := r.client.Delete(key, rf)
+func (r *Registry) getKeyValues(keys ...string) (keyValList, error) {
+	var kvList keyValList
+	resp, err := r.client.Get(strings.Join(keys, "/"), false, true)
+	if err != nil {
+		return kvList, err
+	}
+	for _, node := range resp.Node.Nodes {
+		if !isDir(node) {
+			kvList.add(node.Key, node.Value)
+		}
+	}
+	return kvList, nil
+}
+
+func (r *Registry) deleteKey(keys ...string) error {
+	_, err := r.client.Delete(strings.Join(keys, "/"), true)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *Registry) createDir(keys ...string) error {
-	_, err := r.client.CreateDir(strings.Join(keys, "/"), 0)
-	if err != nil {
-		return err
-	}
-	return nil
+func isDir(node *etcd.Node) bool {
+	return node.Dir && node != nil
 }
 
-// helpers
-func isDir(n *etcd.Node) bool {
-	return n.Dir && n != nil
-}
-
-func join(keys ...string) string {
-	return strings.Join(keys, "/")
-}
-
-func MakeServiceKey(name string) string {
-	return join(namespace, serviceKey, name)
+func makeEtcdServiceKey(name string) string {
+	return path.Join(root, servicePath, name)
 }
