@@ -116,3 +116,11 @@ func TestEqualSlices(t *testing.T) {
 		t.Errorf("expected slices to be equal")
 	}
 }
+
+func TestEqualSlicesUnsorted(t *testing.T) {
+	s1 := []string{"b", "a", "c"}
+	s2 := []string{"a", "b", "c"}
+	if !equalSlices(s1, s2) {
+		t.Errorf("expected slices to be equal")
+	}
+}

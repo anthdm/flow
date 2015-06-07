@@ -1,4 +1,4 @@
-package flowmain
+package main
 
 import (
 	"log"
