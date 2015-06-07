@@ -16,14 +16,20 @@ const (
 	root         string = "/flow"
 	servicePath  string = "/services"
 	endpointPath string = "/endpoints"
+
+	// keyspace where services register themself, telling the registry there are
+	// new, updated or deleted
+	serviceWatchPath string = root + "/register" + "/service"
 )
 
 type Register interface {
 	CreateService(service *api.Service) (*api.Service, error)
 	GetService(key string) (*api.Service, error)
+	GetServices() ([]api.Service, error)
 	CreateEndpoints(endpoints *api.Endpoints) (*api.Endpoints, error)
 	GetServiceEndpoints(name string) (*api.Endpoints, error)
 	GetEndpoints() ([]api.Endpoints, error)
+	WatchServices(services chan []api.Service)
 }
 
 type Registry struct {
@@ -47,6 +53,10 @@ func (r *Registry) CreateService(service *api.Service) (*api.Service, error) {
 			return nil, err
 		}
 	}
+	// let the watchers know the service is successfully created
+	if err := r.setKey("/flow/register/service", service.Name); err != nil {
+		return nil, err
+	}
 	return service, nil
 }
 
@@ -61,6 +71,22 @@ func (r *Registry) GetService(key string) (*api.Service, error) {
 		Protocol: kvals.get(key, "protocol"),
 	}
 	return service, nil
+}
+
+func (r *Registry) GetServices() ([]api.Service, error) {
+	services := make([]api.Service, 0)
+	keys, err := r.getDirKeys(root, servicePath)
+	if err != nil {
+		return services, err
+	}
+	for _, key := range keys {
+		service, err := r.GetService(key)
+		if err != nil {
+			return services, err
+		}
+		services = append(services, *service)
+	}
+	return services, nil
 }
 
 // CreateEndpoints stores endpoints implemented by a service
@@ -112,6 +138,19 @@ func (r *Registry) GetServiceEndpoints(key string) (*api.Endpoints, error) {
 		Subset: subset,
 	}
 	return endpoints, nil
+}
+
+func (r *Registry) WatchServices(servicesch chan []api.Service) {
+	resp := make(chan *etcd.Response)
+	go r.client.Watch(serviceWatchPath, 0, true, resp, nil)
+	for true {
+		<-resp
+		services, err := r.GetServices()
+		if err != nil {
+			panic(err)
+		}
+		servicesch <- services
+	}
 }
 
 // extracts the "host:port" string from a full endpoint keyspace

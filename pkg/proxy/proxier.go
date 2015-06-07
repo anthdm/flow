@@ -4,7 +4,6 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/twanies/flow/api"
 )
@@ -103,16 +102,6 @@ func (p *Proxier) setServiceInfo(service ServicePortName, info *serviceInfo) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.serviceMap[service] = info
-}
-
-func (p *Proxier) Discover() {
-	for {
-		select {
-		default:
-			time.Sleep(10 * time.Second)
-			log.Println("looping")
-		}
-	}
 }
 
 func (p *Proxier) addServiceToPort(service ServicePortName, protocol string, proxyPort int) (*serviceInfo, error) {

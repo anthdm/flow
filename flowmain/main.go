@@ -9,6 +9,7 @@ import (
 
 	"github.com/twanies/flow/api/apiserver"
 	"github.com/twanies/flow/pkg/proxy"
+	"github.com/twanies/flow/pkg/watch"
 )
 
 func Main() {
@@ -19,9 +20,12 @@ func Main() {
 	apiServer := apiserver.NewServer(":5001")
 	apiServer.ServeAPI()
 
+	serviceWatcher := watch.NewServiceWatcher()
+
 	loadBalancer := proxy.NewServiceBalancer()
 	proxier := proxy.NewProxier(loadBalancer)
-	go proxier.Discover()
+
+	serviceWatcher.RegisterHandler(proxier)
 
 	srv := NewServer(*listen, &reverseProxyHandler{})
 	srv.CloseTimeout = *closeTimeout
