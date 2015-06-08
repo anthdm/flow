@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
 	"runtime"
 
 	"github.com/twanies/flow/api/apiserver"
@@ -11,13 +12,15 @@ import (
 )
 
 var (
-	listen    = flag.String("listen", ":9999", "")
-	listenAPI = flag.String("listenapi", ":5001", "")
+	listen       = flag.String("listen", ":9999", "")
+	listenAPI    = flag.String("listenapi", ":5001", "")
+	etcdMachines = flag.String("machines", "h", "")
 )
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	flag.Parse()
+	os.Setenv("FLOW_MACHINES", *etcdMachines)
 
 	apiServer := apiserver.NewServer(*listenAPI)
 	apiServer.ServeAPI()

@@ -96,6 +96,14 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request, vars map[str
 	return writeJSON(w, http.StatusOK, service)
 }
 
+func (s *Server) getListServices(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	services, err := s.registry.GetServices()
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, services)
+}
+
 func (s *Server) postCreateEndpoints(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if vars == nil {
 		return errors.New("missing params")
@@ -129,6 +137,22 @@ func (s *Server) getListEndpoints(w http.ResponseWriter, r *http.Request, vars m
 	return writeJSON(w, http.StatusOK, allEndpoints)
 }
 
+func (s *Server) deleteEndpoints(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	name := vars["name"]
+	if err := s.registry.DeleteEndpoints(name); err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, fmt.Sprintf("%s deleted", name))
+}
+
+func (s *Server) deleteService(w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	name := vars["name"]
+	if err := s.registry.DeleteService(name); err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, fmt.Sprintf("%s deleted", name))
+}
+
 func writeJSON(w http.ResponseWriter, code int, v interface{}) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -140,6 +164,7 @@ func createRouter(s *Server) *mux.Router {
 	m := map[string]map[string]httpApifunc{
 		"GET": {
 			"/service/{name}":   s.getService,
+			"/service":          s.getListServices,
 			"/endpoints/{name}": s.getServiceEndpoints,
 			"/endpoints":        s.getListEndpoints,
 		},
@@ -147,7 +172,10 @@ func createRouter(s *Server) *mux.Router {
 			"/service":   s.postCreateService,
 			"/endpoints": s.postCreateEndpoints,
 		},
-		"DELETE": {},
+		"DELETE": {
+			"/service/{name}":   s.deleteService,
+			"/endpoints/{name}": s.deleteEndpoints,
+		},
 	}
 	for method, routes := range m {
 		for route, handler := range routes {

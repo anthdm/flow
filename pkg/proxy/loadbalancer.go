@@ -33,6 +33,11 @@ func (s ServicePortName) String() string {
 	return fmt.Sprintf("%s:%s", s.Name, s.Port)
 }
 
+type hostPort struct {
+	host string
+	port int
+}
+
 // serviceBalancer directs traffic between nodes from the same service cluster
 type serviceBalancer struct {
 	lock     sync.RWMutex
@@ -77,9 +82,9 @@ func (sb *serviceBalancer) AddService(service ServicePortName) {
 // Addservice will cause a deadlock assumes the lock is allready held
 func (sb *serviceBalancer) addServiceInternal(service ServicePortName) *balancerState {
 	if _, exists := sb.services[service]; !exists {
+		log.Printf("registered %s to the loadbalancer", service)
 		sb.services[service] = &balancerState{}
 	}
-	log.Printf("registered %s to the loadbalancer", service)
 	return sb.services[service]
 }
 
@@ -91,32 +96,45 @@ func (sb *serviceBalancer) Update(endpoints []api.Endpoints) {
 
 	for i := range endpoints {
 		svcEndpoints := &endpoints[i]
-		serviceName := ServicePortName{svcEndpoints.Name, ""}
-		state, exists := sb.services[serviceName]
-		curEndpoints := []string{}
-		if state != nil {
-			curEndpoints = state.endpoints
+
+		hostPortMap := make(map[string][]hostPort)
+		for i := range svcEndpoints.Ports {
+			port := svcEndpoints.Ports[i]
+			for i := range svcEndpoints.Addresses {
+				address := svcEndpoints.Addresses[i]
+				hostPortMap[port.Name] = append(hostPortMap[port.Name], hostPort{address, port.Port})
+			}
 		}
-		newEndpoints := endpointsToSlice(svcEndpoints)
-		if !exists || !equalSlices(curEndpoints, newEndpoints) {
-			state := sb.addServiceInternal(serviceName)
-			state.endpoints = endpointsToSlice(svcEndpoints)
-			state.index = 0
+
+		for portName := range hostPortMap {
+			serviceName := ServicePortName{svcEndpoints.Name, portName}
+			state, exists := sb.services[serviceName]
+			curEndpoints := []string{}
+			if state != nil {
+				curEndpoints = state.endpoints
+			}
+			newEndpoints := endpointsToSlice(hostPortMap[portName])
+			if !exists || !equalSlices(curEndpoints, newEndpoints) {
+				state := sb.addServiceInternal(serviceName)
+				state.endpoints = endpointsToSlice(hostPortMap[portName])
+				state.index = 0
+			}
+			registeredEndpoints[serviceName] = true
 		}
-		registeredEndpoints[serviceName] = true
 	}
 
 	for k := range sb.services {
 		if _, ok := registeredEndpoints[k]; !ok {
+			log.Printf("removing endpoints %s", k)
 			delete(sb.services, k)
 		}
 	}
 }
 
-func endpointsToSlice(endpoints *api.Endpoints) []string {
+func endpointsToSlice(hostPorts []hostPort) []string {
 	var out []string
-	for _, endpoint := range endpoints.Subset {
-		out = append(out, fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port))
+	for _, hostPort := range hostPorts {
+		out = append(out, fmt.Sprintf("%s:%d", hostPort.host, hostPort.port))
 	}
 	return out
 }

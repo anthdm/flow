@@ -20,13 +20,12 @@ var tcpServerPort int
 
 func TestUpdateProxier(t *testing.T) {
 	lb := NewServiceBalancer()
-	service := ServicePortName{"foo", ""}
-	lb.Update([]api.Endpoints{
-		{
-			Name:   "foo",
-			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
-		},
-	})
+	service := ServicePortName{"foo", "b"}
+	lb.Update([]api.Endpoints{api.Endpoints{
+		Name:      "foo",
+		Addresses: []string{"127.0.0.1"},
+		Ports:     []api.EndpointPort{api.EndpointPort{"b", tcpServerPort}},
+	}})
 	proxier := NewProxier(lb)
 	waitNumLoops(t, proxier, 0)
 	_, err := proxier.addServiceToPort(service, "tcp", 3000)
@@ -39,13 +38,12 @@ func TestUpdateProxier(t *testing.T) {
 
 func TestUpdateDelete(t *testing.T) {
 	lb := NewServiceBalancer()
-	service := ServicePortName{"chat", ""}
-	lb.Update([]api.Endpoints{
-		{
-			Name:   "chat",
-			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
-		},
-	})
+	service := ServicePortName{"foo", "b"}
+	lb.Update([]api.Endpoints{api.Endpoints{
+		Name:      "foo",
+		Addresses: []string{"127.0.0.1"},
+		Ports:     []api.EndpointPort{api.EndpointPort{"b", tcpServerPort}},
+	}})
 	proxier := NewProxier(lb)
 	info, err := proxier.addServiceToPort(service, "tcp", 3001)
 	if err != nil {
@@ -64,13 +62,12 @@ func TestUpdateDelete(t *testing.T) {
 
 func TestTcpUpdateDeleteUpdate(t *testing.T) {
 	lb := NewServiceBalancer()
-	service := ServicePortName{"chat", ""}
-	lb.Update([]api.Endpoints{
-		{
-			Name:   "chat",
-			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
-		},
-	})
+	service := ServicePortName{"foo", "a"}
+	lb.Update([]api.Endpoints{api.Endpoints{
+		Name:      "foo",
+		Addresses: []string{"127.0.0.1"},
+		Ports:     []api.EndpointPort{api.EndpointPort{"a", tcpServerPort}},
+	}})
 	proxier := NewProxier(lb)
 	info, err := proxier.addServiceToPort(service, "tcp", 3002)
 	if err != nil {
@@ -85,23 +82,29 @@ func TestTcpUpdateDeleteUpdate(t *testing.T) {
 	if _, ok := proxier.getServiceInfo(service); ok {
 		t.Fatal("expected service not to be present in the serviceMap")
 	}
-	proxier.Update([]api.Service{api.Service{Name: "chat", Protocol: "tcp"}})
+	proxier.Update([]api.Service{api.Service{
+		Name: "foo",
+		Ports: []api.ServicePort{
+			api.ServicePort{"a", 90, 9999, "tcp"},
+		},
+	}})
+
 	info, ok := proxier.getServiceInfo(service)
 	if !ok {
-		t.Fatal("exptected service to be present in the serviceMap")
+		t.Fatalf("exptected service %+v to be present in the serviceMap %+v", service, proxier.serviceMap)
 	}
 	testReadWriteTCP(t, "127.0.0.1", info.proxyPort)
 }
 
 func TestCloseProxy(t *testing.T) {
 	lb := NewServiceBalancer()
-	service := ServicePortName{"foo", ""}
-	lb.Update([]api.Endpoints{
-		{
-			Name:   "chat",
-			Subset: []api.Endpoint{{Host: "127.0.0.1", Port: tcpServerPort}},
-		},
-	})
+	service := ServicePortName{"foo", "a"}
+	lb.Update([]api.Endpoints{api.Endpoints{
+		Name:      "foo",
+		Addresses: []string{"127.0.0.1"},
+		Ports:     []api.EndpointPort{api.EndpointPort{"a", tcpServerPort}},
+	}})
+
 	proxier := NewProxier(lb)
 	info, err := proxier.addServiceToPort(service, "tcp", 3001)
 	if err != nil {

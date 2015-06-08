@@ -31,56 +31,95 @@ func TestLoadBalancerFailsNoEndpoints(t *testing.T) {
 }
 
 func TestExpectEndpoints(t *testing.T) {
-	serviceName := ServicePortName{"foo", ""}
+	serviceName := ServicePortName{"foo", "a"}
 	endpoints := api.Endpoints{
-		Name: "foo",
-		Subset: []api.Endpoint{
-			api.Endpoint{"1.1", 3000},
-			api.Endpoint{"1.1", 3001},
-			api.Endpoint{"1.1", 3002},
+		Name:      "foo",
+		Addresses: []string{"1.1"},
+		Ports: []api.EndpointPort{
+			api.EndpointPort{"a", 8080},
+			api.EndpointPort{"a", 8081},
+			api.EndpointPort{"a", 8082},
 		},
 	}
+
 	balancer := NewServiceBalancer()
 	balancer.AddService(serviceName)
 	balancer.Update([]api.Endpoints{endpoints})
-	expectEndpoint(t, serviceName, balancer, "1.1:3000")
-	expectEndpoint(t, serviceName, balancer, "1.1:3001")
-	expectEndpoint(t, serviceName, balancer, "1.1:3002")
+	expectEndpoint(t, serviceName, balancer, "1.1:8080")
+	expectEndpoint(t, serviceName, balancer, "1.1:8081")
+	expectEndpoint(t, serviceName, balancer, "1.1:8082")
+	expectEndpoint(t, serviceName, balancer, "1.1:8080")
 }
 
-func TestExpectEndpointsWithNoService(t *testing.T) {
+func TestExpectMultipleEndpointsMultiplePorts(t *testing.T) {
+	serviceName1 := ServicePortName{"foo", "a"}
+	serviceName2 := ServicePortName{"foo", "b"}
 	endpoints := api.Endpoints{
-		Name: "foo",
-		Subset: []api.Endpoint{
-			api.Endpoint{"1.1", 3000},
-			api.Endpoint{"1.1", 3001},
-			api.Endpoint{"1.1", 3002},
+		Name:      "foo",
+		Addresses: []string{"1.1", "1.2"},
+		Ports: []api.EndpointPort{
+			api.EndpointPort{"a", 8080},
+			api.EndpointPort{"b", 8081},
 		},
 	}
-	loadBalancer := NewServiceBalancer()
-	loadBalancer.Update([]api.Endpoints{endpoints})
-	service := ServicePortName{"foo", ""}
-	expectEndpoint(t, service, loadBalancer, "1.1:3000")
-	expectEndpoint(t, service, loadBalancer, "1.1:3001")
-	expectEndpoint(t, service, loadBalancer, "1.1:3002")
+	balancer := NewServiceBalancer()
+	balancer.Update([]api.Endpoints{endpoints})
+
+	curEndpoints := balancer.services[serviceName1].endpoints
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[0])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[1])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[0])
+
+	curEndpoints = balancer.services[serviceName2].endpoints
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[0])
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[1])
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[0])
 }
 
-func TestUpdateDeleteEndpoints(t *testing.T) {
-	service := ServicePortName{"foo", ""}
-	lb := NewServiceBalancer()
-	lb.AddService(service)
+func TestExpectMultipleEndpointsAndPortsWithUpdate(t *testing.T) {
+	serviceName1 := ServicePortName{"foo", "a"}
+	serviceName2 := ServicePortName{"foo", "b"}
 	endpoints := api.Endpoints{
-		Name: "bar",
-		Subset: []api.Endpoint{
-			api.Endpoint{"1.1", 3000},
-			api.Endpoint{"1.1", 3001},
-			api.Endpoint{"1.1", 3002},
+		Name:      "foo",
+		Addresses: []string{"1.1", "1.2"},
+		Ports: []api.EndpointPort{
+			api.EndpointPort{"a", 8080},
+			api.EndpointPort{"b", 8081},
+			api.EndpointPort{"a", 8082},
+			api.EndpointPort{"b", 8082},
 		},
 	}
-	lb.Update([]api.Endpoints{endpoints})
-	if _, ok := lb.services[service]; ok {
-		t.Fatal("expexted %s not to be present in the serviceMap")
+	balancer := NewServiceBalancer()
+	balancer.Update([]api.Endpoints{endpoints})
+
+	curEndpoints := balancer.services[serviceName1].endpoints
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[0])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[1])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[2])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[3])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[0])
+
+	curEndpoints = balancer.services[serviceName2].endpoints
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[0])
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[1])
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[2])
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[3])
+	expectEndpoint(t, serviceName2, balancer, curEndpoints[0])
+
+	endpoints = api.Endpoints{
+		Name:      "foo",
+		Addresses: []string{"1.3", "1.4"},
+		Ports: []api.EndpointPort{
+			api.EndpointPort{"a", 1},
+			api.EndpointPort{"b", 2},
+		},
 	}
+
+	balancer.Update([]api.Endpoints{endpoints})
+	curEndpoints = balancer.services[serviceName1].endpoints
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[0])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[1])
+	expectEndpoint(t, serviceName1, balancer, curEndpoints[0])
 }
 
 func expectEndpoint(t *testing.T, service ServicePortName, balancer *serviceBalancer, expected string) {

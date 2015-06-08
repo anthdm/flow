@@ -2,8 +2,8 @@ package registry
 
 import (
 	"errors"
-	"fmt"
 	"net"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -19,7 +19,8 @@ const (
 
 	// keyspace where services register themself, telling the registry there are
 	// new, updated or deleted
-	serviceWatchPath string = root + "/register" + "/service"
+	serviceWatchPath   string = root + "/register" + "/service"
+	endpointsWatchPath string = root + "/register" + "/endpoints"
 )
 
 type Register interface {
@@ -30,14 +31,22 @@ type Register interface {
 	GetServiceEndpoints(name string) (*api.Endpoints, error)
 	GetEndpoints() ([]api.Endpoints, error)
 	WatchServices(services chan []api.Service)
+	WatchEndpoints(endpoints chan []api.Endpoints)
+	DeleteService(name string) error
+	DeleteEndpoints(name string) error
 }
 
 type Registry struct {
 	client *etcd.Client
 }
 
+// TODO: just a quick fix for now
 func NewRegistry() *Registry {
-	machines := []string{"http://127.0.0.1:2379"}
+	m := os.Getenv("FLOW_MACHINES")
+	if m == "" {
+		m = "http://localhost:4001"
+	}
+	machines := []string{m}
 	client := etcd.NewClient(machines)
 	return &Registry{client}
 }
@@ -45,7 +54,6 @@ func NewRegistry() *Registry {
 // CreateService stores a new service to the registry
 func (r *Registry) CreateService(service *api.Service) (*api.Service, error) {
 	kvList := keyValList{}
-	kvList.add("protocol", service.Protocol)
 	kvList.add("name", service.Name)
 	for _, kv := range kvList.list {
 		key := path.Join(makeEtcdServiceKey(service.Name), kv.key)
@@ -54,7 +62,7 @@ func (r *Registry) CreateService(service *api.Service) (*api.Service, error) {
 		}
 	}
 	// let the watchers know the service is successfully created
-	if err := r.setKey("/flow/register/service", service.Name); err != nil {
+	if err := r.setKey(serviceWatchPath, service.Name); err != nil {
 		return nil, err
 	}
 	return service, nil
@@ -67,8 +75,7 @@ func (r *Registry) GetService(key string) (*api.Service, error) {
 		return nil, err
 	}
 	service := &api.Service{
-		Name:     kvals.get(key, "name"),
-		Protocol: kvals.get(key, "protocol"),
+		Name: kvals.get(key, "name"),
 	}
 	return service, nil
 }
@@ -89,17 +96,23 @@ func (r *Registry) GetServices() ([]api.Service, error) {
 	return services, nil
 }
 
+func (r *Registry) DeleteService(name string) error {
+	keyspace := makeEtcdServiceKey(name)
+	_, err := r.client.Delete(keyspace, true)
+	if err != nil {
+		return err
+	}
+	// let the watchers know they need to reconfigure
+	if err := r.setKey(serviceWatchPath, name); err != nil {
+		return err
+	}
+	return nil
+}
+
 // CreateEndpoints stores endpoints implemented by a service
 // endpoints are stored like "/flow/endpoints/{name}/host:port"
 func (r *Registry) CreateEndpoints(endpoints *api.Endpoints) (*api.Endpoints, error) {
-	for _, endpoint := range endpoints.Subset {
-		hostPort := fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port)
-		endpointKeyspace := path.Join(root, endpointPath, endpoints.Name, hostPort)
-		if err := r.createDir(endpointKeyspace); err != nil {
-			return nil, err
-		}
-	}
-	return endpoints, nil
+	return nil, nil
 }
 
 // GetEndpoints retrieves all endpoints stored in the registry
@@ -121,23 +134,19 @@ func (r *Registry) GetEndpoints() ([]api.Endpoints, error) {
 
 // GetServiceEndpoints retrieves the endpoints from a service by its keyspace
 func (r *Registry) GetServiceEndpoints(key string) (*api.Endpoints, error) {
-	keys, err := r.getDirKeys(key)
+	return nil, nil
+}
+
+func (r *Registry) DeleteEndpoints(name string) error {
+	keyspace := makeEtcdEndpointsKey(name)
+	_, err := r.client.Delete(keyspace, true)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	name := strings.TrimPrefix(key, path.Join(root, endpointPath))
-	name = strings.TrimPrefix(name, "/")
-	var subset []api.Endpoint
-	for _, key := range keys {
-		host, port := extractEndpointFromKey(key)
-		endpoint := api.Endpoint{host, port}
-		subset = append(subset, endpoint)
+	if err := r.setKey(endpointsWatchPath, name); err != nil {
+		return err
 	}
-	endpoints := &api.Endpoints{
-		Name:   name,
-		Subset: subset,
-	}
-	return endpoints, nil
+	return nil
 }
 
 func (r *Registry) WatchServices(servicesch chan []api.Service) {
@@ -150,6 +159,19 @@ func (r *Registry) WatchServices(servicesch chan []api.Service) {
 			panic(err)
 		}
 		servicesch <- services
+	}
+}
+
+func (r *Registry) WatchEndpoints(endpointsch chan []api.Endpoints) {
+	resp := make(chan *etcd.Response)
+	go r.client.Watch(endpointsWatchPath, 0, true, resp, nil)
+	for true {
+		<-resp
+		endpoints, err := r.GetEndpoints()
+		if err != nil {
+			panic(err)
+		}
+		endpointsch <- endpoints
 	}
 }
 
@@ -261,4 +283,8 @@ func isDir(node *etcd.Node) bool {
 
 func makeEtcdServiceKey(name string) string {
 	return path.Join(root, servicePath, name)
+}
+
+func makeEtcdEndpointsKey(name string) string {
+	return path.Join(root, endpointPath, name)
 }

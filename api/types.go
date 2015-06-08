@@ -11,22 +11,19 @@ type Service struct {
 	// to a valid proxy address.
 	Name string `json:"name"`
 
-	// Protocol is the IP protocol of the port. UDP" and "TCP"
-	Protocol string `json:"protocol"`
-
-	// Port is the internal allocated port
-	Port     int          `json:"port"`
-	Frontend FrontendSpec `json:"frontend"`
-
-	// TODO: implement multiple proxys for services that are not needed to be
-	// loadbalanced like a mongo or redis server. These services need specific
 	// ports to be claimed and assigned
 	Ports []ServicePort `json:"ports"`
 }
 
 type ServicePort struct {
+	// name of the port linked with the service
+	Name string
+
 	// Port needed to be exposed for the service
 	Port int
+
+	// TargetPort is the port exposed by the actual "container or process"
+	TargetPort int
 
 	// Protocol is the IP protocol of the port. UDP" and "TCP"
 	Protocol string
@@ -50,13 +47,14 @@ type FrontendSpec struct {
 	Route string `json:"route"`
 }
 
-type Endpoint struct {
-	Host string `json:"host"`
+type EndpointPort struct {
+	Name string `json:"name"`
 	Port int    `json:"port"`
 }
 
-// Endpoints is a set of endpoints implemented by a specific service
+// Endpoints for a service
 type Endpoints struct {
-	Name   string     `json:"name"`
-	Subset []Endpoint `json:"subset"`
+	Name      string         `json:"name"`
+	Addresses []string       `json:"addresses"`
+	Ports     []EndpointPort `json:"ports"`
 }

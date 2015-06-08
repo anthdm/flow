@@ -42,31 +42,34 @@ func (p *Proxier) Update(services []api.Service) {
 	activeServices := make(map[ServicePortName]bool)
 	for i := range services {
 		service := &services[i]
-		serviceName := ServicePortName{service.Name, ""}
-		info, exists := p.getServiceInfo(serviceName)
-		if exists && sameInfo(info, service) {
-			// no updates
-			continue
-		}
-		if exists {
-			log.Printf("receiving updates for service %s", serviceName)
-			panic("no implementation")
 
+		for i := range service.Ports {
+			servicePort := &service.Ports[i]
+			serviceName := ServicePortName{service.Name, servicePort.Name}
+			activeServices[serviceName] = true
+			info, exists := p.getServiceInfo(serviceName)
+			if exists && sameInfo(info, service, servicePort) {
+				// no updates
+				continue
+			}
+			if exists {
+				log.Printf("receiving updates for service %s", serviceName)
+				panic("no implementation")
+			}
+			log.Printf("discovering %s as a new service", serviceName)
+			port, err := p.proxyPorts.AssignNext()
+			if err != nil {
+				log.Printf("failed to assign new port for %s", serviceName)
+				continue
+			}
+			info, err = p.addServiceToPort(serviceName, servicePort.Protocol, port)
+			if err != nil {
+				log.Printf("failed to start proxy for %s: %v", serviceName, err)
+				continue
+			}
+			log.Printf("service %s running on port %d", serviceName, port)
+			p.loadBalancer.AddService(serviceName)
 		}
-		log.Printf("discovering %s as a new service", serviceName)
-		port, err := p.proxyPorts.AssignNext()
-		if err != nil {
-			log.Printf("failed to assign new port for %s", serviceName)
-			continue
-		}
-		info, err = p.addServiceToPort(serviceName, service.Protocol, port)
-		if err != nil {
-			log.Printf("failed to start proxy for %s: %v", serviceName, err)
-			continue
-		}
-		log.Printf("service %s running on port %d", serviceName, port)
-		p.loadBalancer.AddService(serviceName)
-		activeServices[serviceName] = true
 	}
 
 	p.mu.Lock()
@@ -84,10 +87,7 @@ func (p *Proxier) Update(services []api.Service) {
 	}
 }
 
-func sameInfo(info *serviceInfo, service *api.Service) bool {
-	if info.protocol != service.Protocol || info.proxyPort != service.Port {
-		return false
-	}
+func sameInfo(info *serviceInfo, service *api.Service, port *api.ServicePort) bool {
 	return true
 }
 

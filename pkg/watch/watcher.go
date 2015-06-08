@@ -8,6 +8,7 @@ import (
 // ServiceUpdateHandler handles updating the current state to the desired state
 // of services
 type ServiceUpdateHandler interface {
+	// Update is called whenever a change is detected in the current state
 	Update(services []api.Service)
 }
 
@@ -63,5 +64,10 @@ func (ew *EndpointWatcher) RegisterHandler(handler EndpointUpdateHandler) {
 }
 
 func (ew *EndpointWatcher) WatchForUpdates() {
-
+	endpointsUpdate := make(chan []api.Endpoints)
+	go ew.store.WatchEndpoints(endpointsUpdate)
+	for true {
+		endpoints := <-endpointsUpdate
+		ew.handler.Update(endpoints)
+	}
 }
